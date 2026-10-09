@@ -50,6 +50,33 @@ We provide two `notebooks` that illustrate the use of BE-DICT (`perbase`) and (`
    - [BE-DICT `perbase` model](https://nbviewer.jupyter.org/github/uzh-dqbm-cmi/crispr/blob/master/demo/BEDICT_model_demonstration.ipynb)
    - [BE-DICT `bystander` model](https://nbviewer.jupyter.org/github/uzh-dqbm-cmi/crispr/blob/master/demo/BEDICT_haplotype_model_demoseqs.ipynb)
 
+### Training the models & reproducing the figures 🏋️
+
+The code to **train** both models from scratch and to **regenerate the figure panels** is
+included. See [`docs/TRAINING.md`](docs/TRAINING.md) for the input data schemas, the
+hyperparameters and the full list of panels.
+
+```shell
+# regenerate the panels that only need the shipped models + the sample sequences
+python scripts/reproduce_figures.py --panels perbase-attention,perbase-profile,bystander
+
+# train the perbase model (5 runs, published hyperparameters)
+python scripts/train_perbase.py --data data/ABEmax_screen.csv --editor ABEmax \
+    --output-dir trained_models_rerun/perbase
+
+# train the bystander model
+python scripts/train_bystander.py --data data/ABEmax_haplotypes.csv --editor ABEmax \
+    --output-dir trained_models_rerun/bystander
+
+# smoke tests (train tiny models on synthetic data)
+python -m pytest tests/ -v
+```
+
+The training defaults reproduce the architecture and the hyperparameters of the models
+under `trained_models/`, and the models that are written out follow the same folder
+layout, so they can be loaded directly by `BEDICT_CriscasModel` /
+`BEDICT_HaplotypeModel` via their `trained_models_dir` argument.
+
 ### OS & Packages' version
 
 The models were trained, tested and ran on Linux machine `Ubuntu 18.04.3 LTS` with one `Tesla P4 GPU` support.

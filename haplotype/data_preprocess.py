@@ -113,20 +113,27 @@ class HaplotypeSeqProcessor(object):
         return gdf_clean
 
     def preprocess_df(self, df, inpseq_colnames, outcomeseq_colname):
-        """
+        """removes the duplicated outcome sequences of every input sequence
+
         Args:
             df: dataframe
             inpseq_colnames: list of column names such as ['seq_id', 'Inp_seq']
             outcomeseq_colname: string, column name of observed outcome sequences
-        
+
+        Note:
+            keeping only the first occurrence of an outcome sequence within every input
+            sequence group is equivalent to dropping the duplicates of the
+            (input sequence, outcome sequence) pairs, which is what is done here. The
+            grouped variant (see :func:`_check_duplicates`) relied on `groupby.apply`
+            forwarding the grouping columns, which is no longer the case in recent
+            pandas versions.
         """
         print('--- removing duplicates (if found!) ---')
-        prg_counter=0
-        dfg = df.groupby(by=inpseq_colnames)
-        pbar = tqdm(total=dfg.ngroups)
-        df_clean = dfg.apply(self._check_duplicates, outcomeseq_colname, pbar, prg_counter)
-        pbar.close()
-        df_clean.reset_index(inplace=True, drop=True)
+        subset = list(inpseq_colnames) + [outcomeseq_colname]
+        df_clean = df.drop_duplicates(subset=subset, keep='first')
+        num_dropped = len(df) - len(df_clean)
+        print(f'number of duplicate outcome sequences removed: {num_dropped}')
+        df_clean = df_clean.reset_index(drop=True)
         return df_clean
 
 
@@ -332,8 +339,10 @@ class HaplotypeSeqProcessor(object):
         baseseq_letters_df.columns = [f'{suffix}_L{i}' for  i in range(1, num_nucl)]
 
         # replace base letters with numbers
-        baseseq_df.replace(['A', 'C', 'T', 'G'], [0,1,2,3], inplace=True)
-        
+        # Note: the explicit cast keeps the columns numeric (i.e. int64) across pandas
+        # versions, as `replace` on object columns no longer downcasts the dtype
+        baseseq_df = baseseq_df.replace(['A', 'C', 'T', 'G'], [0,1,2,3]).astype(np.int64)
+
         base_df = pd.concat([seqid_df,
                              base_mask,
                              df,
@@ -388,7 +397,13 @@ class VizInpOutp_Haplotype(object):
         tb.field_names = ['Desc.'] + [f'{i}' for i in range(1, seq_len+1)]
         
         cond = df['seq_id'] == seqid
-        cond_thr = df['pred_score'] >= predscore_thr
+        # the threshold applies to the predicted score; when the table is built from the
+        # observed proportions only (i.e. no `pred_score` column), it applies to those
+        thr_colname = 'pred_score' if 'pred_score' in df.columns else outcome_colname
+        if thr_colname is not None and thr_colname in df.columns:
+            cond_thr = df[thr_colname] >= predscore_thr
+        else:
+            cond_thr = pd.Series(True, index=df.index)
         df = df.loc[(cond) & (cond_thr)].copy()
         # sort df by outcome probability
         if outcome_colname is not None:

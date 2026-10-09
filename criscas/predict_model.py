@@ -14,9 +14,22 @@ from .attnetion_analysis import filter_attn_rows
 
 
 class BEDICT_CriscasModel:
-    def __init__(self, base_editor, device):
+    def __init__(self, base_editor, device, trained_models_dir=None):
+        """
+        Args:
+            base_editor: string, name of the base editor (i.e. `ABEmax`)
+            device: torch device
+            trained_models_dir: string or None, path to the `trained_models` folder.
+                                It defaults to the one shipped with the repo, which also
+                                allows loading models trained with
+                                :func:`criscas.train_val.train_perbase_model`.
+        """
         self.base_editor = base_editor
         self.device = device
+        if trained_models_dir is None:
+            repo_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
+            trained_models_dir = os.path.join(repo_dir, 'trained_models')
+        self.trained_models_dir = trained_models_dir
 
     def _process_df(self, df, target_base):
         print('--- processing input data frame ---')
@@ -60,8 +73,8 @@ class BEDICT_CriscasModel:
 
     def _load_model_statedict_(self, model, run_num):
         print('--- loading trained model ---')
-        base_dir = os.path.abspath(os.path.join(os.getcwd(), os.pardir))
-        run_pth = os.path.join(base_dir, 'trained_models', 'perbase', self.base_editor, 'train_val', f'run_{run_num}')
+        run_pth = os.path.join(self.trained_models_dir, 'perbase', self.base_editor,
+                               'train_val', f'run_{run_num}')
         print(run_pth)
         device = self.device
 
@@ -149,13 +162,24 @@ class BEDICT_CriscasModel:
         return pred_w_attn_df
 
 
-    def predict_from_dataframe(self, df, batch_size=500):
-        # TODO: add target run num for specific editor
+    def predict_from_dataframe(self, df, batch_size=500, num_runs=5, target_base=None):
+        """run the trained models of every run and return their predictions + attention
 
-        if self.base_editor in {'ABEmax', 'ABE8e'}:
-            target_base = 'A'
-        elif self.base_editor in {'BE4max', 'Target-AID'}:
-            target_base = 'C'
+        Args:
+            df: pandas.DataFrame with the columns [ID, seq]
+            batch_size: int, number of sequences processed per batch
+            num_runs: int, number of trained models (i.e. data partitions) to run
+            target_base: string or None, targeted nucleotide; inferred from the base
+                         editor name when not passed
+        """
+        if target_base is None:
+            if self.base_editor in {'ABEmax', 'ABE8e'}:
+                target_base = 'A'
+            elif self.base_editor in {'BE4max', 'Target-AID'}:
+                target_base = 'C'
+            else:
+                raise ValueError(f'unknown base editor: {self.base_editor}; '
+                                 'please pass `target_base` explicitly')
 
         proc_df = self._process_df(df, target_base)
         dtensor = self._construct_datatensor(proc_df)
@@ -166,7 +190,7 @@ class BEDICT_CriscasModel:
         
         model = self._build_base_model()
 
-        for run_num in range(5):
+        for run_num in range(num_runs):
             self._load_model_statedict_(model, run_num)
             print(f'running prediction for base_editor: {self.base_editor} | run_num: {run_num}')
             seqid_fattnw_map, seqid_hattnw_map, pred_df = self._run_prediction(model, dloader)
@@ -199,7 +223,8 @@ class BEDICT_CriscasModel:
     def select_prediction(self, pred_w_attn_runs_df, option):
         assert option in {'mean', 'median', 'max', 'min'}, "selection option should be in {mean, median, min, max}!"
         if option == 'mean':
-            pred_w_attn_df = pred_w_attn_runs_df.groupby(['id', 'base_pos', 'model_name']).mean().reset_index()
+            # `numeric_only` skips the non-numeric columns (i.e. run_id) that cannot be averaged
+            pred_w_attn_df = pred_w_attn_runs_df.groupby(['id', 'base_pos', 'model_name']).mean(numeric_only=True).reset_index()
         else:
             pred_w_attn_df = pred_w_attn_runs_df.groupby(['id', 'base_pos', 'model_name']).apply(self._select_prediction_run, option).reset_index(drop=True)
         return pred_w_attn_df
@@ -215,7 +240,7 @@ class BEDICT_CriscasModel:
         letter_vars = [f'L{i}' for i in range(1,21)]
         prob = df['prob_score_class1']
         base_pos = df['base_pos'] + 1
-        attn_scores  = df[[f'Attn{i}'for i in range(20)]].values.astype(np.float).reshape(1,-1)
+        attn_scores  = df[[f'Attn{i}'for i in range(20)]].values.astype(np.float64).reshape(1,-1)
         max_score = df[[f'Attn{i}'for i in range(20)]].max()
         base_letters =  df[letter_vars].values.reshape(1,-1).tolist()
         cbar_kws={'label': 'Attention score', 'orientation': 'horizontal'}
