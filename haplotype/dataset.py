@@ -47,7 +47,7 @@ class SeqMaskGenerator(object):
         
         
         tm = mask_targetbase[:, ewindow_st:ewindow_end+1]
-        tindx = np.where(tm.astype(np.bool))
+        tindx = np.where(tm.astype(bool))
         
 #         print('tindx:\n', tindx)
         # tindx (array(), array()) representing row and column indices where mask has 1 entries
